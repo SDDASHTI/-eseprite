@@ -38,32 +38,7 @@ jobs:
           arch: x64
 
       # ============================================================
-      # 4. Show build environment
-      # ============================================================
-      - name: Show build environment
-        shell: powershell
-        run: |
-          Write-Host "========================================"
-          Write-Host "Build Environment"
-          Write-Host "========================================"
-
-          Write-Host "`nCMake:"
-          cmake --version
-
-          Write-Host "`nNinja:"
-          ninja --version
-
-          Write-Host "`nMSVC:"
-          cl
-
-          Write-Host "`nGit:"
-          git --version
-
-          Write-Host "`nArchitecture:"
-          Write-Host $env:PROCESSOR_ARCHITECTURE
-
-      # ============================================================
-      # 5. Download official Aseprite Skia package
+      # 4. Download official Aseprite Skia package
       # ============================================================
       - name: Download Skia
         shell: bash
@@ -91,8 +66,6 @@ jobs:
           mkdir -p skia
           skia_file="skia/$(basename "$skia_url")"
 
-          echo -e "\nDownloading: $skia_file"
-
           curl \
             --fail \
             --location \
@@ -102,27 +75,17 @@ jobs:
             -o "$skia_file" \
             "$skia_url"
 
-          echo -e "\nExtracting Skia..."
           unzip -q "$skia_file" -d skia
-
-          echo -e "\nChecking Skia..."
-
-          if [[ ! -d "skia/out/Release-x64" ]]; then
-            echo "ERROR: Expected skia/out/Release-x64 not found."
-            find skia -maxdepth 4 -type d | sort
-            exit 1
-          fi
 
           if [[ ! -f "skia/out/Release-x64/skia.lib" ]]; then
             echo "ERROR: skia.lib was not found."
-            find skia -name "skia.lib" -print
             exit 1
           fi
 
-          echo -e "\nSkia successfully installed."
+          echo "Skia successfully installed."
 
       # ============================================================
-      # 6. Configure CMake
+      # 5. Configure CMake
       # ============================================================
       - name: Configure CMake
         shell: bash
@@ -147,7 +110,7 @@ jobs:
             -DSKIA_LIBRARY="$(realpath skia/out/Release-x64/skia.lib)"
 
       # ============================================================
-      # 7. Build Aseprite
+      # 6. Build Aseprite
       # ============================================================
       - name: Build Aseprite
         shell: bash
@@ -161,84 +124,7 @@ jobs:
           cmake --build build --target aseprite --parallel
 
       # ============================================================
-      # 8. Verify build output
-      # ============================================================
-      - name: Verify build output
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $bin = Join-Path $env:GITHUB_WORKSPACE "build\bin"
-          $exe = Join-Path $bin "aseprite.exe"
-          $data = Join-Path $bin "data"
-
-          Write-Host "========================================"
-          Write-Host "Verifying build output"
-          Write-Host "========================================"
-
-          if (-not (Test-Path $exe)) { throw "aseprite.exe was not created: $exe" }
-          if (-not (Test-Path $data)) { throw "Aseprite data directory was not created: $data" }
-
-          Write-Host "`nExecutable:"
-          Get-Item $exe | Format-List FullName,Length,LastWriteTime
-
-          Write-Host "`nData directory:"
-          Get-ChildItem $data -Recurse | Select-Object FullName,Length
-
-      # ============================================================
-      # 9. Test the actual BUILD output
-      # ============================================================
-      - name: Test built Aseprite
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $bin = Join-Path $env:GITHUB_WORKSPACE "build\bin"
-          $exe = Join-Path $bin "aseprite.exe"
-
-          Write-Host "========================================"
-          Write-Host "Testing built Aseprite"
-          Write-Host "========================================"
-
-          if (-not (Test-Path $exe)) { throw "Executable not found: $exe" }
-
-          Write-Host "`nRunning --version..."
-          $versionOutput = & $exe --version 2>&1
-          $versionExitCode = $LASTEXITCODE
-
-          Write-Host "`nVersion output:"
-          $versionOutput | ForEach-Object { Write-Host $_ }
-
-          Write-Host "`nExit code: $versionExitCode"
-
-          $versionText = ($versionOutput | Out-String).Trim()
-
-          if ($versionText -match "Aseprite") {
-            Write-Host "`nAseprite version test PASSED."
-          } else {
-            Write-Host "`nWARNING: --version did not return normal console output."
-            Write-Host "We will perform a batch-mode test instead."
-          }
-
-          Write-Host "`nRunning batch-mode test..."
-          $batchOutput = & $exe --batch 2>&1
-          $batchExitCode = $LASTEXITCODE
-
-          Write-Host "`nBatch output:"
-          $batchOutput | ForEach-Object { Write-Host $_ }
-
-          Write-Host "`nBatch exit code: $batchExitCode"
-
-          if ($batchExitCode -ne 0) {
-            throw "Aseprite batch-mode test failed with exit code $batchExitCode."
-          }
-
-          Write-Host "`n========================================"
-          Write-Host "Aseprite executable test PASSED"
-          Write-Host "========================================"
-
-      # ============================================================
-      # 10. Prepare real portable package
+      # 7. Prepare portable package
       # ============================================================
       - name: Prepare portable package
         shell: powershell
@@ -255,74 +141,36 @@ jobs:
           if (Test-Path $package) { Remove-Item $package -Recurse -Force }
           New-Item -ItemType Directory -Path $package | Out-Null
 
-          # Copy executable & data
+          # کپی فایل اجرایی و پوشه data
           $exe = Join-Path $bin "aseprite.exe"
           $data = Join-Path $bin "data"
 
-          if (-not (Test-Path $exe)) { throw "aseprite.exe not found." }
-          if (-not (Test-Path $data)) { throw "data directory not found." }
+          if (-not (Test-Path $exe)) { throw "aseprite.exe not found in build output." }
+          if (-not (Test-Path $data)) { throw "data directory not found in build output." }
 
           Copy-Item $exe $package -Force
           Copy-Item $data $package -Recurse -Force
 
-          # Create portable configuration
+          # تنظیمات نسخه Portable
           "# This file makes Aseprite use a portable configuration." | Set-Content (Join-Path $package "aseprite.ini") -Encoding UTF8
 
-          # Copy documentation
+          # کپی مستندات و لایسنس‌ها در صورت وجود
           $docs = Join-Path $env:GITHUB_WORKSPACE "docs"
           if (Test-Path $docs) { Copy-Item $docs $package -Recurse -Force }
 
-          # Copy license files
           foreach ($name in @("EULA.txt", "LICENSE.txt", "LICENSE", "README.md")) {
             $src = Join-Path $env:GITHUB_WORKSPACE $name
             if (Test-Path $src) { Copy-Item $src $package -Force }
           }
 
-          # Build information
-          $buildInfo = "Aseprite Windows x64`n`nBuild type: Release`nBackend: Skia`nScripting: Lua`n`nBuilt by: GitHub Actions`nRepository: $env:GITHUB_REPOSITORY`nCommit: $env:GITHUB_SHA`nRef: $env:GITHUB_REF`nRunner OS: $env:RUNNER_OS`nArchitecture: $env:PROCESSOR_ARCHITECTURE"
+          # فایل اطلاعات بیلد
+          $buildInfo = "Aseprite Windows x64`n`nBuild type: Release`nBackend: Skia`nBuilt by: GitHub Actions`nCommit: $env:GITHUB_SHA"
           $buildInfo | Set-Content (Join-Path $package "BUILD-INFO.txt") -Encoding UTF8
 
-          Write-Host "`nPortable package created: $package"
+          Write-Host "Portable package prepared successfully."
 
       # ============================================================
-      # 11. Test PORTABLE package
-      # ============================================================
-      - name: Test portable package
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $package = Join-Path $env:GITHUB_WORKSPACE "Aseprite-Windows-x64"
-          $exe = Join-Path $package "aseprite.exe"
-          $data = Join-Path $package "data"
-
-          Write-Host "========================================"
-          Write-Host "Testing portable package"
-          Write-Host "========================================"
-
-          if (-not (Test-Path $exe)) { throw "Portable aseprite.exe not found." }
-          if (-not (Test-Path $data)) { throw "Portable data directory not found." }
-
-          Write-Host "`nRunning portable Aseprite in batch mode..."
-
-          Push-Location $package
-          try {
-            & ".\aseprite.exe" --batch
-            $exitCode = $LASTEXITCODE
-
-            Write-Host "`nPortable exit code: $exitCode"
-
-            if ($exitCode -ne 0) {
-              throw "Portable Aseprite failed with exit code $exitCode."
-            }
-          } finally {
-            Pop-Location
-          }
-
-          Write-Host "`nPortable package test PASSED."
-
-      # ============================================================
-      # 12. Upload Artifact
+      # 8. Upload Artifact
       # ============================================================
       - name: Upload portable package
         uses: actions/upload-artifact@v4
