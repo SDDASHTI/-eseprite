@@ -82,26 +82,34 @@ jobs:
         shell: bash
         run: |
           set -e
+
           cmake --build build --target aseprite --parallel
 
       - name: Verify executable
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
           $exe = Join-Path $env:GITHUB_WORKSPACE "build\bin\aseprite.exe"
 
           if (-not (Test-Path $exe)) {
-            Write-Error "Aseprite executable was not created: $exe"
-            exit 1
+            throw "Aseprite executable was not created: $exe"
           }
 
-          Write-Host "Aseprite executable:"
+          Write-Host "Aseprite executable found:"
           Get-Item $exe | Format-List FullName,Length,LastWriteTime
 
       - name: Prepare portable package
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
           $bin = Join-Path $env:GITHUB_WORKSPACE "build\bin"
           $package = Join-Path $env:GITHUB_WORKSPACE "Aseprite-Windows-x64"
+
+          if (-not (Test-Path $bin)) {
+            throw "Build output directory not found: $bin"
+          }
 
           if (Test-Path $package) {
             Remove-Item $package -Recurse -Force
@@ -109,11 +117,8 @@ jobs:
 
           New-Item -ItemType Directory -Path $package | Out-Null
 
-          # The Aseprite build output contains the executable and the runtime
-          # resources produced/required by the current build.
           Copy-Item "$bin\*" $package -Recurse -Force
 
-          # Copy license / source notices when present.
           foreach ($name in @(
             "EULA.txt",
             "LICENSE.txt",
@@ -121,48 +126,94 @@ jobs:
             "README.md"
           )) {
             $src = Join-Path $env:GITHUB_WORKSPACE $name
+
             if (Test-Path $src) {
               Copy-Item $src $package -Force
             }
           }
 
-          # Keep a small build-information file beside the executable.
-          @"
-          Aseprite Windows x64
-          Build type: Release
-          Backend: Skia
-          Scripting: Lua
-          Built by: GitHub Actions
-          Repository: $env:GITHUB_REPOSITORY
-          Commit: $env:GITHUB_SHA
-          "@ | Set-Content (Join-Path $package "BUILD-INFO.txt") -Encoding UTF8
+          $buildInfo = @"
+Aseprite Windows x64
+Build type: Release
+Backend: Skia
+Scripting: Lua
+Built by: GitHub Actions
+Repository: $env:GITHUB_REPOSITORY
+Commit: $env:GITHUB_SHA
+"@
 
+          $buildInfo | Set-Content `
+            (Join-Path $package "BUILD-INFO.txt") `
+            -Encoding UTF8
+
+          Write-Host ""
           Write-Host "Portable package contents:"
-          Get-ChildItem $package -Recurse | Select-Object FullName,Length
+          Get-ChildItem $package -Recurse |
+            Select-Object FullName,Length
 
       - name: Smoke test executable
         shell: powershell
         run: |
-          $exe = Join-Path $env:GITHUB_WORKSPACE "Aseprite-Windows-x64\aseprite.exe"
+          $ErrorActionPreference = "Stop"
+
+          $exe = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "Aseprite-Windows-x64\aseprite.exe"
 
           if (-not (Test-Path $exe)) {
-            Write-Error "Packaged aseprite.exe not found."
-            exit 1
+            throw "Packaged aseprite.exe not found: $exe"
           }
 
-          # --version is a lightweight CLI smoke test and should not open the GUI.
-          & $exe --version
+          Write-Host "========================================"
+          Write-Host "Aseprite Smoke Test"
+          Write-Host "========================================"
+          Write-Host "Executable: $exe"
+          Write-Host ""
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Aseprite --version failed with exit code $LASTEXITCODE."
-            exit $LASTEXITCODE
+          $output = & $exe --version 2>&1
+          $exitCode = $LASTEXITCODE
+
+          Write-Host "Aseprite output:"
+          $output | ForEach-Object {
+            Write-Host $_
           }
+
+          Write-Host ""
+          Write-Host "Process exit code: $exitCode"
+          Write-Host ""
+
+          $versionText = ($output | Out-String).Trim()
+
+          if ($versionText -match "Aseprite\s+\S+") {
+            Write-Host "SUCCESS: Aseprite executable is working."
+            Write-Host "Detected version: $versionText"
+            exit 0
+          }
+
+          Write-Error "Aseprite did not return valid version information."
+
+          if ($exitCode -ne 0) {
+            Write-Error "Process exit code: $exitCode"
+          }
+
+          exit 1
 
       - name: Create ZIP
         shell: powershell
         run: |
-          $package = Join-Path $env:GITHUB_WORKSPACE "Aseprite-Windows-x64"
-          $zip = Join-Path $env:GITHUB_WORKSPACE "Aseprite-Windows-x64.zip"
+          $ErrorActionPreference = "Stop"
+
+          $package = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "Aseprite-Windows-x64"
+
+          $zip = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "Aseprite-Windows-x64.zip"
+
+          if (-not (Test-Path $package)) {
+            throw "Portable package not found: $package"
+          }
 
           if (Test-Path $zip) {
             Remove-Item $zip -Force
@@ -174,12 +225,12 @@ jobs:
             -CompressionLevel Optimal
 
           if (-not (Test-Path $zip)) {
-            Write-Error "ZIP file was not created."
-            exit 1
+            throw "ZIP file was not created."
           }
 
           Write-Host "Created package:"
-          Get-Item $zip | Format-List FullName,Length,LastWriteTime
+          Get-Item $zip |
+            Format-List FullName,Length,LastWriteTime
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
